@@ -108,3 +108,24 @@ def test_presets_lists_every_layout():
   result = run("presets")
   assert result.exit_code == 0
   assert "avery-5160" in result.output and "avery-l7159" in result.output
+
+
+class TestCsvEncoding:
+  """Spreadsheet exports are full of byte-order marks."""
+
+  def test_utf8_bom_does_not_hide_the_id_column(self, tmp_path):
+    csv_path = tmp_path / "in.csv"
+    csv_path.write_text("id,caption,subtitle\nBOX-01,Memories,cards\n", encoding="utf-8-sig")
+    assert csv_path.read_bytes().startswith(b"\xef\xbb\xbf"), "test needs a real BOM"
+
+    out = tmp_path / "sheet.pdf"
+    result = run("sheet", "-o", str(out), "--csv", str(csv_path))
+    assert result.exit_code == 0, result.output
+    assert out.exists()
+
+  def test_error_names_the_columns_it_found(self, tmp_path):
+    csv_path = tmp_path / "in.csv"
+    csv_path.write_text("name,where\nBOX-01,Attic\n")
+    result = run("sheet", "-o", str(tmp_path / "s.pdf"), "--csv", str(csv_path))
+    assert result.exit_code != 0
+    assert "name" in result.output and "where" in result.output
