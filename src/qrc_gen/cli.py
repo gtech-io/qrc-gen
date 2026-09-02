@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import csv
 import sys
+import warnings
 from pathlib import Path
 from typing import Annotated
 
@@ -274,7 +275,14 @@ def _parse_extras(extras: list[str] | None) -> dict[str, str]:
 
 SheetOutput = Annotated[
   Path,
-  typer.Option("--output", "-o", help="SVG to write. Extra pages get -2, -3 suffixes."),
+  typer.Option(
+    "--output",
+    "-o",
+    help=(
+      "File to write. .pdf puts every page in one file and is what you want "
+      "for printing; .svg writes one file per page."
+    ),
+  ),
 ]
 CsvFile = Annotated[
   Path | None,
@@ -331,18 +339,23 @@ def sheet(
   spec = _preset(preset)
   items = _sheet_labels(csv_file, prefix, count, start, pad, base_url, subtitle)
   try:
-    written = render_sheet(
-      items,
-      output,
-      spec=spec,
-      error=_error_level(error),
-      skip=skip,
-      show_cut_lines=cut_lines,
-    )
+    with warnings.catch_warnings(record=True) as caught:
+      warnings.simplefilter("always")
+      written = render_sheet(
+        items,
+        output,
+        spec=spec,
+        error=_error_level(error),
+        skip=skip,
+        show_cut_lines=cut_lines,
+      )
   except ValueError as exc:
     raise typer.BadParameter(str(exc)) from exc
+  for warning in caught:
+    typer.echo(f"warning: {warning.message}", err=True)
+  pages = -(-(len(items) + skip) // spec.per_page)
   typer.echo(
-    f"Wrote {len(items)} labels across {len(written)} page(s) on {spec.name}: "
+    f"Wrote {len(items)} labels across {pages} page(s) on {spec.name}: "
     + ", ".join(str(path) for path in written),
     err=True,
   )

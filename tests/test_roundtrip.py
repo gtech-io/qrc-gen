@@ -5,6 +5,9 @@ Skipped unless the optional `decode` dependency group is installed
 just for a test. CI always runs it.
 """
 
+import shutil
+import subprocess
+
 import pytest
 
 cv2 = pytest.importorskip("cv2", reason="install the 'decode' dependency group")
@@ -23,8 +26,28 @@ CASES = [
 ]
 
 
+#: OpenCV's detector is unreliable on very large, hard-edged renders and
+#: decodes them happily once they are the size a camera would see. Scanning
+#: at this width keeps the tests measuring our layout, not that quirk.
+SCAN_WIDTH = 500
+
+
 def decode(path) -> str:
   data, *_ = cv2.QRCodeDetector().detectAndDecode(cv2.imread(str(path)))
+  return data
+
+
+def scan(image) -> str:
+  """Decode a cropped code the way a phone camera would see it."""
+  height, width = image.shape[:2]
+  if width > SCAN_WIDTH:
+    scale = SCAN_WIDTH / width
+    image = cv2.resize(
+      image,
+      (SCAN_WIDTH, max(1, int(height * scale))),
+      interpolation=cv2.INTER_AREA,
+    )
+  data, *_ = cv2.QRCodeDetector().detectAndDecode(image)
   return data
 
 
@@ -76,23 +99,16 @@ def test_every_code_on_a_printed_sheet_scans(tmp_path):
   _rasterize(chrome, svg, png)
 
   sheet = cv2.imread(str(png))
-  detector = cv2.QRCodeDetector()
   failures = []
   for index, want in enumerate(expected):
-    x, y = spec.origin(index)
-    cell = sheet[
-      int(y * PX_PER_MM) : int((y + spec.cell_h) * PX_PER_MM),
-      int(x * PX_PER_MM) : int((x + spec.cell_w) * PX_PER_MM),
-    ]
-    got, *_ = detector.detectAndDecode(cell)
+    code = _crop_qr(sheet, spec, index, PX_PER_MM)
+    got = scan(code)
     if got != want:
       failures.append((ids[index], want, got))
   assert not failures
 
 
 def _find_chrome() -> str | None:
-  import shutil
-
   for name in ("google-chrome", "chromium", "chromium-browser", "google-chrome-stable"):
     found = shutil.which(name)
     if found:
@@ -101,8 +117,6 @@ def _find_chrome() -> str | None:
 
 
 def _rasterize(chrome: str, svg, png) -> None:
-  import subprocess
-
   subprocess.run(
     [
       chrome, "--headless", "--disable-gpu", "--no-sandbox",
@@ -114,3 +128,72 @@ def _rasterize(chrome: str, svg, png) -> None:
     capture_output=True,
     timeout=120,
   )
+
+
+# 600dpi is what a laser printer actually rasterizes at. It also keeps the
+# module grid clear of the sampling artifacts that make poppler's output at
+# some intermediate resolutions undecodable for reasons unrelated to layout.
+PDF_DPI = 600
+
+
+def test_pdf_page_geometry_matches_the_stock(tmp_path):
+  """A PDF carries its own page size, which is the whole point of using one."""
+  pypdf = pytest.importorskip("pypdf", reason="install the 'decode' dependency group")
+
+  spec = PRESETS["avery-l7159"]  # A4 stock, to catch a hardcoded Letter
+  out = tmp_path / "sheet.pdf"
+  render_sheet([Label("A")] * (spec.per_page + 1), out, spec=spec)
+
+  reader = pypdf.PdfReader(str(out))
+  assert len(reader.pages) == 2, "both pages belong in the one file"
+  box = reader.pages[0].mediabox
+  assert float(box.width) == pytest.approx(spec.page_w * 72 / 25.4, abs=0.5)
+  assert float(box.height) == pytest.approx(spec.page_h * 72 / 25.4, abs=0.5)
+
+
+def test_every_code_in_a_printed_pdf_scans(tmp_path):
+  """Render a two-page PDF, rasterize it, and scan every cell back."""
+  if shutil.which("pdftoppm") is None:
+    pytest.skip("poppler's pdftoppm is needed to rasterize the PDF")
+
+  spec = PRESETS[DEFAULT_PRESET]
+  total = spec.per_page + 3
+  ids = [f"BIN-{n:03d}" for n in range(1, total + 1)]
+  expected = [payloads.storage_label(i, base_url="inv.example.com") for i in ids]
+
+  out = tmp_path / "sheet.pdf"
+  render_sheet(
+    [Label(payload=p, caption=i) for i, p in zip(ids, expected, strict=True)],
+    out,
+    spec=spec,
+  )
+  subprocess.run(
+    ["pdftoppm", "-r", str(PDF_DPI), "-png", str(out), str(tmp_path / "page")],
+    check=True,
+    capture_output=True,
+    timeout=120,
+  )
+
+  failures = []
+  for index, want in enumerate(expected):
+    page_number, cell_index = divmod(index, spec.per_page)
+    sheet = cv2.imread(str(tmp_path / f"page-{page_number + 1}.png"))
+    code = _crop_qr(sheet, spec, cell_index, PDF_DPI / 25.4)
+    got = scan(code)
+    if got != want:
+      failures.append((ids[index], want, got))
+  assert not failures
+
+
+def _crop_qr(sheet, spec, index: int, px_per_mm: float):
+  """Crop the square at the leading edge of cell `index`.
+
+  Derived from the sheet spec alone, never from the layout code under test -
+  otherwise a mis-placed code would simply drag the crop along with it and
+  the test would pass regardless.
+  """
+  x, y = spec.origin(index)
+  left = int(x * px_per_mm)
+  top = int(y * px_per_mm)
+  size = int(spec.cell_h * px_per_mm)
+  return sheet[top : top + size, left : left + size]

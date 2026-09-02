@@ -1,4 +1,7 @@
-# qrc
+# qrc-gen — a QR code generator for the command line
+
+[![CI](https://github.com/gtech-io/qrc-gen/actions/workflows/ci.yml/badge.svg)](https://github.com/gtech-io/qrc-gen/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 A CLI that generates QR codes for the things people actually scan: contact
 cards, phone numbers, emails, URLs — and printable sheets of labels for the
@@ -103,7 +106,7 @@ Number a run of bins and lay them out on label stock:
 
 ```bash
 qrc sheet --prefix BIN- --count 30 --base-url inv.gtech.io \
-  --preset avery-5160 -o bins.svg
+  --preset avery-5160 -o bins.pdf
 ```
 
 Or drive it from a CSV, which is how you get real captions on the labels:
@@ -117,20 +120,35 @@ TOTE-03,Kids books,Basement / bay 1
 
 ```bash
 qrc sheet --csv inventory.csv --base-url inv.gtech.io \
-  --preset avery-5163 --cut-lines -o labels.svg
+  --preset avery-5163 --cut-lines -o labels.pdf
 ```
 
 ![A sheet of storage labels](docs/sample-sheet.png)
 
 Columns are `id` (or `payload`, to encode something arbitrary), `caption` and
-`subtitle`. Anything past the first page is written to `labels-2.svg`,
-`labels-3.svg` and so on.
+`subtitle`.
 
 Half a sheet of labels left over? `--skip 4` leaves the first four cells blank
 so you can feed it back through the printer.
 
-**Print at 100% scale, not "fit to page."** The SVG is laid out in real
-millimetres, so scaling it is what makes labels miss their backing paper.
+### PDF or SVG
+
+The extension picks the output:
+
+| | `.pdf` | `.svg` |
+| --- | --- | --- |
+| Pages | All in one file | One file per page — `labels-2.svg`, `labels-3.svg` |
+| Printing | Carries its own page size, so it prints at 100% by default | Browsers rescale it unless you turn off "fit to page" |
+| Editing | Not really | Open it in any vector editor |
+| Captions | Helvetica, so Latin-1 text only | Whatever fonts the viewer has |
+
+**Print the PDF.** SVG is there for when you want to edit the sheet or drop it
+into something else. Both are laid out in real millimetres.
+
+Captions outside Latin-1 — Japanese, Chinese, Cyrillic — can print as black
+boxes in PDF, because the built-in PDF fonts do not carry those glyphs. `qrc`
+warns when it spots them and you can write an `.svg` instead. The QR payloads
+are never affected; this is only the text a human reads.
 
 ### Label stock
 
@@ -156,11 +174,15 @@ uv run pytest
 uv run ruff check .
 ```
 
-The `decode` group installs OpenCV for `tests/test_roundtrip.py`, which renders
-codes and scans them back with a decoder that is not our own code. That test
-rasterizes a full label sheet through headless Chrome and decodes every cell,
-which is how a two-module quiet zone that looked fine to the eye — and failed
-on real scanners — got caught.
+The `decode` group installs OpenCV and pypdf for `tests/test_roundtrip.py`,
+which renders codes and scans them back with a decoder that is not our own
+code. It rasterizes real sheets — SVG through headless Chrome, PDF through
+poppler's `pdftoppm` — and decodes every cell. That is how a two-module quiet
+zone that looked fine to the eye, and failed on real scanners, got caught.
+
+The crops it scans are computed from the sheet spec, never from the layout
+code under test; otherwise a mis-placed code would drag the crop along with
+it and the test would pass regardless.
 
 ## Licence
 
