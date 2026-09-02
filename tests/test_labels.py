@@ -1,6 +1,12 @@
 import pytest
 
 from qrc_gen.labels import PRESETS, Label, SheetSpec, render_sheet
+from qrc_gen.labels.layout import (
+  CAPTION_FONT,
+  fit,
+  unsupported_characters,
+  width_mm,
+)
 
 SPEC = SheetSpec(
   "test", page_w=100, page_h=100, cols=2, rows=2,
@@ -72,3 +78,64 @@ class TestRenderSheet:
     out = tmp_path / "sheet.svg"
     render_sheet([Label("A")], out, spec=SPEC)
     assert 'stroke="#cccccc"' not in out.read_text()
+
+
+class TestFormatDispatch:
+  def test_rejects_unknown_extension(self, tmp_path):
+    with pytest.raises(ValueError, match="unsupported sheet format"):
+      render_sheet([Label("A")], tmp_path / "sheet.png", spec=SPEC)
+
+  def test_pdf_keeps_every_page_in_one_file(self, tmp_path):
+    out = tmp_path / "sheet.pdf"
+    written = render_sheet([Label(str(i)) for i in range(9)], out, spec=SPEC)
+    assert written == [out]
+    assert out.read_bytes().startswith(b"%PDF")
+
+  def test_svg_still_spills_across_files(self, tmp_path):
+    out = tmp_path / "sheet.svg"
+    written = render_sheet([Label(str(i)) for i in range(9)], out, spec=SPEC)
+    assert len(written) == 3
+
+
+class TestTextFitting:
+  """Truncation uses real Helvetica metrics, not a characters-wide guess."""
+
+  def test_short_text_is_untouched(self):
+    assert fit("BIN-001", CAPTION_FONT, 4.2, 40) == "BIN-001"
+
+  def test_long_text_gains_an_ellipsis(self):
+    got = fit("Extremely long caption text here", CAPTION_FONT, 4.2, 20)
+    assert got.endswith("…") and got != "…"
+
+  def test_result_actually_fits(self):
+    for available in (10, 15, 20, 30):
+      got = fit("Extremely long caption text here", CAPTION_FONT, 4.2, available)
+      assert width_mm(got, CAPTION_FONT, 4.2) <= available
+
+  def test_wide_text_truncates_sooner_than_narrow_text(self):
+    # A metrics-blind implementation would cut both at the same length.
+    assert len(fit("W" * 40, CAPTION_FONT, 4.2, 20)) < len(
+      fit("i" * 40, CAPTION_FONT, 4.2, 20)
+    )
+
+
+class TestPdfTextCoverage:
+  def test_plain_ascii_is_supported(self):
+    assert unsupported_characters("BIN-001 / shelf 3") == ""
+
+  def test_latin1_accents_are_supported(self):
+    assert unsupported_characters("Café naïve — Zürich…") == ""
+
+  def test_cjk_is_flagged(self):
+    assert unsupported_characters("日本語") == "日本語"
+
+  def test_each_character_is_reported_once(self):
+    assert unsupported_characters("日日日") == "日"
+
+  def test_warns_when_writing_a_pdf(self, tmp_path):
+    with pytest.warns(UserWarning, match="may not render in PDF"):
+      render_sheet([Label("A", caption="日本語")], tmp_path / "s.pdf", spec=SPEC)
+
+  def test_stays_quiet_for_svg(self, tmp_path, recwarn):
+    render_sheet([Label("A", caption="日本語")], tmp_path / "s.svg", spec=SPEC)
+    assert not [w for w in recwarn if issubclass(w.category, UserWarning)]
