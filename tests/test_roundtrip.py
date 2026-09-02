@@ -2,15 +2,25 @@
 
 Skipped unless the optional `decode` dependency group is installed
 (`uv sync --group decode`), because OpenCV is a heavy dependency to carry
-just for a test. CI always runs it.
+just for a test.
+
+Set QRC_REQUIRE_DECODE=1 to turn every skip in this file into a failure.
+CI does, because these are the only tests that check a code actually scans,
+and a silent skip here looks exactly like a green run.
 """
 
+import os
 import shutil
 import subprocess
 
 import pytest
 
-cv2 = pytest.importorskip("cv2", reason="install the 'decode' dependency group")
+REQUIRED = os.environ.get("QRC_REQUIRE_DECODE") == "1"
+
+if REQUIRED:
+  import cv2
+else:
+  cv2 = pytest.importorskip("cv2", reason="install the 'decode' dependency group")
 
 from qrc_gen import payloads, render  # noqa: E402
 from qrc_gen.labels import DEFAULT_PRESET, PRESETS, Label, render_sheet  # noqa: E402
@@ -83,7 +93,7 @@ def test_every_code_on_a_printed_sheet_scans(tmp_path):
   """
   chrome = _find_chrome()
   if chrome is None:
-    pytest.skip("no Chrome/Chromium available to rasterize the SVG")
+    _missing("Chrome/Chromium", "rasterize the SVG")
 
   spec = PRESETS[DEFAULT_PRESET]
   ids = [f"BIN-{n:03d}" for n in range(1, spec.per_page + 1)]
@@ -106,6 +116,14 @@ def test_every_code_on_a_printed_sheet_scans(tmp_path):
     if got != want:
       failures.append((ids[index], want, got))
   assert not failures
+
+
+def _missing(tool: str, purpose: str) -> None:
+  """Skip for a missing tool - unless CI has said these tests are mandatory."""
+  message = f"{tool} is needed to {purpose}"
+  if REQUIRED:
+    pytest.fail(f"QRC_REQUIRE_DECODE is set but {message}")
+  pytest.skip(message)
 
 
 def _find_chrome() -> str | None:
@@ -154,7 +172,7 @@ def test_pdf_page_geometry_matches_the_stock(tmp_path):
 def test_every_code_in_a_printed_pdf_scans(tmp_path):
   """Render a two-page PDF, rasterize it, and scan every cell back."""
   if shutil.which("pdftoppm") is None:
-    pytest.skip("poppler's pdftoppm is needed to rasterize the PDF")
+    _missing("poppler's pdftoppm", "rasterize the PDF")
 
   spec = PRESETS[DEFAULT_PRESET]
   total = spec.per_page + 3

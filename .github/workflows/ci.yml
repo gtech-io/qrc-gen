@@ -16,6 +16,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Install system tools the scan tests need
+        # poppler rasterizes the PDF sheets; the GL/glib libs are what
+        # OpenCV's wheel links against, without which `import cv2` fails.
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            poppler-utils libgl1 libglib2.0-0
+
       - name: Install uv
         uses: astral-sh/setup-uv@v5
         with:
@@ -30,4 +38,9 @@ jobs:
         run: uv run ruff check .
 
       - name: Test
-        run: uv run pytest -q
+        # QRC_REQUIRE_DECODE turns every skip in tests/test_roundtrip.py into
+        # a failure. Those are the only tests that check a code actually
+        # scans, and a silent skip there looks just like a green run.
+        env:
+          QRC_REQUIRE_DECODE: "1"
+        run: uv run pytest -q -rs
