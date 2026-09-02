@@ -1,0 +1,57 @@
+[project]
+name = "qrc-gen"
+version = "0.1.0"
+description = "Generate QR codes for contacts, phone numbers, emails, URLs and printable storage-container labels."
+readme = "README.md"
+authors = [
+    { name = "Hamel Mesfin", email = "hamelmesfin@gmail.com" }
+]
+requires-python = ">=3.11"
+license = "MIT"
+keywords = ["qr", "qrcode", "cli", "vcard", "labels", "inventory"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: End Users/Desktop",
+    "Programming Language :: Python :: 3 :: Only",
+    "Topic :: Multimedia :: Graphics",
+    "Topic :: Utilities",
+]
+dependencies = [
+    "segno>=1.6.6",
+    "typer>=0.27.2",
+]
+
+[project.urls]
+Homepage = "https://github.com/gtech-io/qrc-gen"
+Issues = "https://github.com/gtech-io/qrc-gen/issues"
+
+[project.scripts]
+qrc = "qrc_gen.cli:main"
+
+[build-system]
+requires = ["uv_build>=0.9.11,<0.10.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+    "ruff>=0.16.5",
+]
+# Independent QR decoder, used only by tests/test_roundtrip.py.
+decode = [
+    "opencv-python-headless>=4.10",
+]
+
+[tool.ruff]
+line-length = 100
+indent-width = 2
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
+
+[tool.ruff.format]
+indent-style = "space"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
