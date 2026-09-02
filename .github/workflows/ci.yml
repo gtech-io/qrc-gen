@@ -13,12 +13,18 @@ jobs:
       matrix:
         python-version: ["3.11", "3.12", "3.13"]
 
+    env:
+      # Every uv command in this job must use the matrix interpreter. Without
+      # this, `uv run` falls back to .python-version (3.11) and rebuilds the
+      # environment, so the matrix silently tested 3.11 three times.
+      UV_PYTHON: ${{ matrix.python-version }}
+
     steps:
       - uses: actions/checkout@v4
 
       - name: Install system tools the scan tests need
-        # poppler rasterizes the PDF sheets; the GL/glib libs are what
-        # OpenCV's wheel links against, without which `import cv2` fails.
+        # poppler rasterizes the PDF sheets. The GL/glib libs are what
+        # OpenCV's wheel links against on some images.
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
@@ -32,10 +38,10 @@ jobs:
       - name: Install dependencies
         # The decode group pulls in OpenCV, which tests/test_roundtrip.py uses
         # to scan the generated codes back with something other than our code.
-        run: uv sync --group decode --python ${{ matrix.python-version }}
+        run: uv sync --group decode
 
       - name: Lint
-        run: uv run ruff check .
+        run: uv run --group decode ruff check .
 
       - name: Test
         # QRC_REQUIRE_DECODE turns every skip in tests/test_roundtrip.py into
@@ -43,4 +49,6 @@ jobs:
         # scans, and a silent skip there looks just like a green run.
         env:
           QRC_REQUIRE_DECODE: "1"
-        run: uv run pytest -q -rs
+        run: |
+          uv run --group decode python -c "import sys, cv2; print(sys.version, cv2.__version__)"
+          uv run --group decode pytest -q -rs
