@@ -399,7 +399,10 @@ def _sheet_labels(
     elif identifier:
       encoded = _guard(payloads.storage_label, identifier, base_url)
     else:
-      raise typer.BadParameter("each CSV row needs an 'id' or a 'payload' column")
+      found = ", ".join(row) or "none"
+      raise typer.BadParameter(
+        f"each CSV row needs an 'id' or a 'payload' column; found: {found}"
+      )
     out.append(
       Label(
         payload=encoded,
@@ -411,12 +414,21 @@ def _sheet_labels(
 
 
 def _read_csv(path: Path) -> list[dict[str, str]]:
+  """Read a CSV, tolerating the byte-order mark spreadsheets like to add.
+
+  Without utf-8-sig the first header parses as "\ufeffid" rather than "id",
+  and every row looks like it is missing its id column.
+  """
   if str(path) == "-":
-    return list(csv.DictReader(sys.stdin))
+    return list(csv.DictReader(_strip_bom(sys.stdin.read()).splitlines()))
   if not path.exists():
     raise typer.BadParameter(f"no such file: {path}")
-  with path.open(newline="", encoding="utf-8") as handle:
+  with path.open(newline="", encoding="utf-8-sig") as handle:
     return list(csv.DictReader(handle))
+
+
+def _strip_bom(text: str) -> str:
+  return text.removeprefix("\ufeff")
 
 
 @app.command()
